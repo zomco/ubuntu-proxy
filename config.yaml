@@ -1,0 +1,18 @@
+server: endpoint.exaple.com:443
+
+auth: ubuntu.ubuntu
+
+obfs:
+  type: salamander
+  salamander:
+    password: 8ZuA2Zpqhuk8yakXvMjDqEXBwA
+
+bandwidth:
+  up: 20 mbps
+  down: 100 mbps
+
+socks5:
+  listen: 127.0.0.1:10808
+
+http:
+  listen: 127.0.0.1:10809

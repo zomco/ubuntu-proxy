@@ -3,11 +3,11 @@
 # ==============================================================================
 #
 # Title:        Global Proxy Manager for Ubuntu 24.04 (Hysteria Version)
-# Description:  This script starts/stops a local Hysteria proxy service,
-#               configures the system-wide proxy (for Docker, APT, wget, etc.),
-#               and includes a test for connectivity.
+# Description:  This script automatically downloads Hysteria, starts/stops the
+#               service, configures the system-wide proxy (for Docker, APT,
+#               wget, etc.), and includes a test for connectivity.
 # Author:       Gemini
-# Version:      2.5
+# Version:      2.7
 # Last Updated: 2025-07-26
 #
 # Usage:
@@ -16,24 +16,21 @@
 #   ./proxy.sh list
 #   ./proxy.sh test
 #
-# Prerequisites:
-#   - The 'hysteria-linux-amd64' executable must be in the same directory
-#     as this script and be executable (chmod +x hysteria-linux-amd64).
-#   - A 'config' file for Hysteria must be in the same directory.
-#
 # ==============================================================================
 
 # --- Configuration ---
 APT_PROXY_CONF="/etc/apt/apt.conf.d/99proxy.conf"
 ENV_FILE="/etc/environment"
 WGET_RC_FILE="/etc/wgetrc"
-PID_FILE="/tmp/hysteria_proxy.pid" # Using /tmp for the PID file
+PID_FILE="/tmp/hysteria_proxy.pid"
 PROXY_IP="127.0.0.1"
 PROXY_PORT="10809"
-HYSTERIA_EXEC="./hysteria-linux-amd64"
-HYSTERIA_CONFIG="config.yaml"
+HYSTERIA_CONFIG="config"
 DOCKER_PROXY_CONF_DIR="/etc/systemd/system/docker.service.d"
 DOCKER_PROXY_CONF_FILE="${DOCKER_PROXY_CONF_DIR}/http-proxy.conf"
+
+# This will be set dynamically by check_dependencies
+HYSTERIA_EXEC=""
 
 # --- Helper Functions ---
 
@@ -67,6 +64,75 @@ show_usage() {
 
 # --- Core Functions ---
 
+# Function to check for dependencies and download Hysteria if needed
+check_dependencies() {
+    print_msg 34 "Checking for required files..."
+    local arch
+    arch=$(uname -m)
+    local hysteria_arch
+
+    case "$arch" in
+        x86_64) hysteria_arch="amd64" ;;
+        aarch64) hysteria_arch="arm64" ;;
+        armv7l) hysteria_arch="arm" ;;
+        *)
+            print_msg 31 "Unsupported architecture: $arch. Please download the Hysteria binary manually."
+            exit 1
+            ;;
+    esac
+
+    # Set the global HYSTERIA_EXEC variable based on architecture
+    HYSTERIA_EXEC="./hysteria-linux-${hysteria_arch}"
+
+    if [ ! -x "${HYSTERIA_EXEC}" ]; then
+        print_msg 33 "Hysteria executable not found. Attempting to download..."
+
+        # Check for curl (for API lookup) and wget (for download)
+        if ! command -v curl &> /dev/null || ! command -v wget &> /dev/null; then
+            print_msg 31 "Error: 'curl' and 'wget' are required to download dependencies. Please install them and try again."
+            exit 1
+        fi
+
+        local download_url
+        # Use curl to query GitHub API for the latest release download URL for the direct binary
+        # The grep pattern ensures we get the binary and not a .tar.gz or .sha256sum file
+        print_msg 34 "Querying GitHub API for the latest Hysteria release..."
+        download_url=$(curl -s https://api.github.com/repos/apernet/hysteria/releases/latest | grep "browser_download_url" | grep "hysteria-linux-${hysteria_arch}\"" | cut -d '"' -f 4 | head -n 1)
+
+        if [ -z "$download_url" ]; then
+            print_msg 31 "Could not find a download URL for your architecture ($hysteria_arch)."
+            print_msg 33 "This can happen due to GitHub API rate limiting. Please try again later or download it manually."
+            exit 1
+        fi
+
+        print_msg 32 "Found download URL: $download_url"
+        
+        # Use wget to download directly to the target file
+        print_msg 34 "Downloading with wget..."
+        if wget -O "${HYSTERIA_EXEC}" "${download_url}"; then
+            print_msg 32 "Download complete."
+            chmod +x "${HYSTERIA_EXEC}"
+            print_msg 32 "Hysteria executable is now ready at ${HYSTERIA_EXEC}"
+        else
+            print_msg 31 "Failed to download Hysteria using wget. Please check your internet connection or download it manually."
+            # Clean up partially downloaded file
+            [ -f "${HYSTERIA_EXEC}" ] && rm -f "${HYSTERIA_EXEC}"
+            exit 1
+        fi
+    else
+        print_msg 32 "Hysteria executable found at ${HYSTERIA_EXEC}."
+    fi
+
+    if [ ! -f "${HYSTERIA_CONFIG}" ]; then
+        print_msg 31 "CRITICAL: Hysteria '${HYSTERIA_CONFIG}' file not found."
+        print_msg 33 "Please create a valid '${HYSTERIA_CONFIG}' file in this directory before running 'set'."
+        exit 1
+    else
+        print_msg 32 "Hysteria config file found."
+    fi
+}
+
+
 # Function to test proxy connectivity
 test_proxy() {
     local PROXY_URL="http://${PROXY_IP}:${PROXY_PORT}"
@@ -81,7 +147,6 @@ test_proxy() {
     print_msg 33 "Note: This test may be blocked depending on your network location (Foshan, China)."
 
     local http_code
-    # Use curl with specific options for a reliable, non-interactive test
     http_code=$(curl -x "${PROXY_URL}" -k -s -I -o /dev/null -w '%{http_code}' --max-time 10 "https://www.google.com")
     local curl_exit_code=$?
 
@@ -97,23 +162,17 @@ test_proxy() {
 
 # Function to set the global proxy
 set_proxy() {
+    # 1. Check for dependencies first
+    check_dependencies
+
     local PROXY_URL_WITH_SLASH="http://${PROXY_IP}:${PROXY_PORT}/"
     local NO_PROXY_LIST="localhost,127.0.0.1,::1"
 
-    # 1. Start Hysteria Service
+    # 2. Start Hysteria Service
     print_msg 34 "Starting Hysteria proxy service..."
     if [ -f "${PID_FILE}" ] && ps -p "$(cat "${PID_FILE}")" > /dev/null; then
         print_msg 33 "Hysteria service is already running (PID: $(cat "${PID_FILE}"))."
     else
-        if ! [ -x "${HYSTERIA_EXEC}" ]; then
-            print_msg 31 "Error: Hysteria executable not found or not executable at ${HYSTERIA_EXEC}"
-            exit 1
-        fi
-        if ! [ -f "${HYSTERIA_CONFIG}" ]; then
-            print_msg 31 "Error: Hysteria config file not found at ${HYSTERIA_CONFIG}"
-            exit 1
-        fi
-
         nohup "${HYSTERIA_EXEC}" -c "${HYSTERIA_CONFIG}" > /dev/null 2>&1 &
         local pid=$!
         sleep 2
@@ -130,7 +189,7 @@ set_proxy() {
 
     print_msg 34 "Setting global proxy to ${PROXY_IP}:${PROXY_PORT}..."
 
-    # 2. Configure APT proxy
+    # 3. Configure APT proxy
     print_msg 32 "Configuring APT proxy..."
     {
         echo "Acquire::http::Proxy \"${PROXY_URL_WITH_SLASH}\";"
@@ -139,13 +198,11 @@ set_proxy() {
     } | sudo tee "${APT_PROXY_CONF}" > /dev/null
     echo "APT proxy configuration written to ${APT_PROXY_CONF}"
 
-    # 3. Configure wget proxy
+    # 4. Configure wget proxy
     print_msg 32 "Configuring wget proxy..."
-    # Clean up any previous settings added by this script to make it idempotent
     sudo sed -i -e '/^# --- Added by proxy.sh script ---/d' -e '/^use_proxy = on/d' -e "/^http_proxy =/d" -e "/^https_proxy =/d" "${WGET_RC_FILE}"
-    # Add the new settings
     {
-        echo "" # Add a newline for separation
+        echo ""
         echo "# --- Added by proxy.sh script ---"
         echo "use_proxy = on"
         echo "http_proxy = ${PROXY_URL_WITH_SLASH}"
@@ -153,7 +210,7 @@ set_proxy() {
     } | sudo tee -a "${WGET_RC_FILE}" > /dev/null
     echo "wget proxy configured in ${WGET_RC_FILE}"
 
-    # 4. Configure environment variables
+    # 5. Configure environment variables
     print_msg 32 "Configuring system-wide environment variables..."
     sudo sed -i -e '/http_proxy/d' -e '/https_proxy/d' -e '/ftp_proxy/d' -e '/no_proxy/d' -e '/HTTP_PROXY/d' -e '/HTTPS_PROXY/d' -e '/FTP_PROXY/d' -e '/NO_PROXY/d' "${ENV_FILE}"
     {
@@ -168,7 +225,7 @@ set_proxy() {
     } | sudo tee -a "${ENV_FILE}" > /dev/null
     echo "Environment variables set in ${ENV_FILE}"
 
-    # 5. Configure Docker Daemon Proxy
+    # 6. Configure Docker Daemon Proxy
     if command -v docker &> /dev/null; then
         print_msg 32 "Docker detected. Configuring proxy for Docker daemon..."
         sudo mkdir -p "${DOCKER_PROXY_CONF_DIR}"
@@ -187,7 +244,7 @@ set_proxy() {
         print_msg 33 "Docker not found, skipping Docker proxy configuration."
     fi
 
-    # 6. Configure GNOME (desktop) proxy
+    # 7. Configure GNOME (desktop) proxy
     if [ -n "$DISPLAY" ]; then
         print_msg 32 "Configuring GNOME desktop proxy settings..."
         gsettings set org.gnome.system.proxy mode 'manual'
@@ -201,7 +258,7 @@ set_proxy() {
         echo "GNOME proxy settings updated."
     fi
 
-    # 7. Run connectivity test automatically after setting proxy
+    # 8. Run connectivity test automatically after setting proxy
     test_proxy
 
     print_msg 32 "Proxy setup complete!"
