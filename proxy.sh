@@ -25,7 +25,7 @@ WGET_RC_FILE="/etc/wgetrc"
 PID_FILE="/tmp/hysteria_proxy.pid"
 PROXY_IP="127.0.0.1"
 PROXY_PORT="10809"
-HYSTERIA_CONFIG="config"
+HYSTERIA_CONFIG="config.yaml"
 DOCKER_PROXY_CONF_DIR="/etc/systemd/system/docker.service.d"
 DOCKER_PROXY_CONF_FILE="${DOCKER_PROXY_CONF_DIR}/http-proxy.conf"
 
