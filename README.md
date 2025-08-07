@@ -18,11 +18,12 @@ If you are a developer living in mainland China, you will definitely be troubled
     // replace with your own configuration
 
 - Run
+  
     `sudo chmod +x ./hysteria-linxu-amd64`
   
     `sudo chmod +x ./proxy.sh`
 
-    `./proxy.sh set` 
+    `sudo ./proxy.sh set` 
 
 ## Troubleshooting
 If you have any problems, please [open an issue](https://github.com/zomco/ubuntu-proxy/issues)
