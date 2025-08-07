@@ -15,11 +15,13 @@ If you are a developer living in mainland China, you will definitely be troubled
 
     `nano config.yaml`
 
-    // replace with your own configuration
+  // replace with your own configuration
 
 - Run
   
     `sudo chmod +x ./hysteria-linxu-amd64`
+
+  // may need to download manually from https://github.com/apernet/hysteria/releases
   
     `sudo chmod +x ./proxy.sh`
 
